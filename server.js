@@ -35,10 +35,15 @@ roomsDB.run(`
   )
 `);
 
+//create table for account information
 accountDB.run(`
   CREATE TABLE IF NOT EXISTS accounts (
     username TEXT PRIMARY KEY,
-    password TEXT
+    password TEXT,
+    kills INTEGER DEFAULT 0,
+    deaths INTEGER DEFAULT 0,
+    wins INTEGER DEFAULT 0,
+    losses INTEGER DEFAULT 0
   )
 `);
 
@@ -142,5 +147,65 @@ app.post('/login', (req, res) => {
         }
     );
 });
+
+//update users statistics
+app.post('/update-stats', (req, res) => {
+    const { username, kills, deaths, wins, losses } = req.body;
+
+    if (!username) {
+        return res.status(400).json({ error: 'Username is required' });
+    }
+
+    accountDB.run(
+        `
+        UPDATE accounts SET
+          kills = kills + ?,
+          deaths = deaths + ?,
+          wins = wins + ?,
+          losses = losses + ?
+        WHERE username = ?
+        `,
+        [kills || 0, deaths || 0, wins || 0, losses || 0, username],
+        function (err) {
+            if (err) {
+                res.status(500).json({ error: 'Failed to update stats' });
+            } else {
+                res.json({ message: 'Stats updated successfully' });
+            }
+        }
+    );
+});
+
+//get a users stats
+app.get('/stats/:username', (req, res) => {
+    const username = req.params.username;
+
+    accountDB.get(
+        `SELECT kills, deaths, wins, losses FROM accounts WHERE username = ?`,
+        [username],
+        (err, row) => {
+            if (err) {
+                return res.status(500).json({ error: 'Error fetching stats' });
+            } else if (!row) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+
+            const { kills, deaths, wins, losses } = row;
+            const kd = deaths === 0 ? kills : (kills / deaths).toFixed(2);
+            const wl = losses === 0 ? wins : (wins / losses).toFixed(2);
+
+            res.json({
+                kills,
+                deaths,
+                wins,
+                losses,
+                kd,
+                winLoss: wl
+            });
+        }
+    );
+});
+
+
 
 
