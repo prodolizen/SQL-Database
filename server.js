@@ -1,53 +1,48 @@
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
+const bcrypt = require('bcrypt');
 
 const app = express();
 const port = 3000;
+const SALT_ROUNDS = 10;
 
 app.use(cors());
 app.use(express.json());
 
-// Create or open database for server ips and room codes
+// === DATABASE SETUP === //
 const roomsDB = new sqlite3.Database('./matchmaking.db', (err) => {
-    if (err) {
-        console.error(err.message);
-    } else {
-        console.log('Connected to SQLite DB');
-    }
+    if (err) console.error(err.message);
+    else console.log('Connected to matchmaking DB');
 });
 
-// create or open DB for account information
 const accountDB = new sqlite3.Database('./accounts.db', (err) => {
-    if (err) {
-        console.error(err.message);
-    }
-    else {
-        console.log('accounts connected to SQL DB')
-    }
+    if (err) console.error(err.message);
+    else console.log('Connected to accounts DB');
 });
 
-// Create a table for ips and roomcodes if it doesn't exist
+// Create tables if they don't exist
 roomsDB.run(`
-  CREATE TABLE IF NOT EXISTS rooms (
-    roomCode INTEGER PRIMARY KEY,
-    serverIp TEXT
-  )
+    CREATE TABLE IF NOT EXISTS rooms (
+        roomCode INTEGER PRIMARY KEY,
+        serverIp TEXT
+    )
 `);
 
-//create table for account information
 accountDB.run(`
-  CREATE TABLE IF NOT EXISTS accounts (
-    username TEXT PRIMARY KEY,
-    password TEXT,
-    kills INTEGER DEFAULT 0,
-    deaths INTEGER DEFAULT 0,
-    wins INTEGER DEFAULT 0,
-    losses INTEGER DEFAULT 0
-  )
+    CREATE TABLE IF NOT EXISTS accounts (
+        username TEXT PRIMARY KEY,
+        password TEXT,
+        kills INTEGER DEFAULT 0,
+        deaths INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0
+    )
 `);
 
-// Add a new room
+// === ROOM ROUTES === //
+
+// Create a new room
 app.post('/create-room', (req, res) => {
     const { roomCode, serverIp } = req.body;
 
@@ -77,22 +72,18 @@ app.get('/get-ip/:roomCode', (req, res) => {
             } else if (row) {
                 res.send({ serverIp: row.serverIp });
             } else {
-                res.status(404).send('Room not found hahahahha');
+                res.status(404).send('Room not found');
             }
         }
     );
 });
 
-app.listen(port, () => {
-    console.log(`Matchmaking server running at http://localhost:${port}`);
-});
-
+// Delete a room
 app.delete('/delete-room/:roomCode', (req, res) => {
     const roomCode = parseInt(req.params.roomCode);
 
-    roomsDB.run('DELETE FROM rooms WHERE roomCode = ?', [roomCode], function (err) {
+    roomsDB.run(`DELETE FROM rooms WHERE roomCode = ?`, [roomCode], function (err) {
         if (err) {
-            console.error(err.message);
             res.status(500).json({ error: 'Failed to delete room' });
         } else {
             res.json({ message: `Room ${roomCode} deleted successfully` });
@@ -100,7 +91,9 @@ app.delete('/delete-room/:roomCode', (req, res) => {
     });
 });
 
-// Register a new user
+// === ACCOUNT ROUTES === //
+
+// Register user
 app.post('/register', (req, res) => {
     const { username, password } = req.body;
 
@@ -108,24 +101,30 @@ app.post('/register', (req, res) => {
         return res.status(400).json({ error: 'Username and password required' });
     }
 
-    accountDB.run(
-        `INSERT INTO accounts (username, password) VALUES (?, ?)`,
-        [username, password],
-        function (err) {
-            if (err) {
-                if (err.message.includes('UNIQUE')) {
-                    res.status(409).json({ error: 'Username already exists' });
-                } else {
-                    res.status(500).json({ error: 'Failed to register user' });
-                }
-            } else {
-                res.json({ message: 'User registered successfully' });
-            }
+    bcrypt.hash(password, SALT_ROUNDS, (err, hash) => {
+        if (err) {
+            return res.status(500).json({ error: 'Error hashing password' });
         }
-    );
+
+        accountDB.run(
+            `INSERT INTO accounts (username, password) VALUES (?, ?)`,
+            [username, hash],
+            function (err) {
+                if (err) {
+                    if (err.message.includes('UNIQUE')) {
+                        res.status(409).json({ error: 'Username already exists' });
+                    } else {
+                        res.status(500).json({ error: 'Failed to register user' });
+                    }
+                } else {
+                    res.json({ message: 'User registered successfully' });
+                }
+            }
+        );
+    });
 });
 
-// Log in user
+// Login user
 app.post('/login', (req, res) => {
     const { username, password } = req.body;
 
@@ -133,22 +132,26 @@ app.post('/login', (req, res) => {
         return res.status(400).json({ error: 'Username and password required' });
     }
 
-    accountDB.get(
-        `SELECT * FROM accounts WHERE username = ? AND password = ?`,
-        [username, password],
-        (err, row) => {
-            if (err) {
-                res.status(500).json({ error: 'Login error' });
-            } else if (!row) {
-                res.status(401).json({ error: 'Invalid username or password' });
-            } else {
-                res.json({ message: 'Login successful' });
-            }
+    accountDB.get(`SELECT * FROM accounts WHERE username = ?`, [username], (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: 'Login error' });
         }
-    );
+
+        if (!row) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        bcrypt.compare(password, row.password, (err, result) => {
+            if (err || !result) {
+                return res.status(401).json({ error: 'Invalid username or password' });
+            }
+
+            res.json({ message: 'Login successful' });
+        });
+    });
 });
 
-//update users statistics
+// Update user statistics
 app.post('/update-stats', (req, res) => {
     const { username, kills, deaths, wins, losses } = req.body;
 
@@ -159,10 +162,10 @@ app.post('/update-stats', (req, res) => {
     accountDB.run(
         `
         UPDATE accounts SET
-          kills = kills + ?,
-          deaths = deaths + ?,
-          wins = wins + ?,
-          losses = losses + ?
+            kills = kills + ?,
+            deaths = deaths + ?,
+            wins = wins + ?,
+            losses = losses + ?
         WHERE username = ?
         `,
         [kills || 0, deaths || 0, wins || 0, losses || 0, username],
@@ -176,7 +179,7 @@ app.post('/update-stats', (req, res) => {
     );
 });
 
-//get a users stats
+// Get user statistics
 app.get('/stats/:username', (req, res) => {
     const username = req.params.username;
 
@@ -206,6 +209,7 @@ app.get('/stats/:username', (req, res) => {
     );
 });
 
-
-
-
+// === START SERVER === //
+app.listen(port, () => {
+    console.log(`Matchmaking server running at http://localhost:${port}`);
+});
