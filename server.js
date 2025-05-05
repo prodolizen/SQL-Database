@@ -6,7 +6,7 @@ const https = require('https');
 const fs = require('fs');
 
 const app = express();
-const port = 3000; // ✅ DO NOT USE 443 unless you run as root
+const port = 3000; // 
 const SALT_ROUNDS = 10;
 
 app.use(cors());
@@ -131,6 +131,82 @@ app.get('/stats/:username', (req, res) => {
 
         res.json({ kills, deaths, wins, losses, kd, winLoss: wl });
     });
+});
+
+// === DEDICATED SERVER MANAGEMENT === //
+let activeServers = [];
+
+// Start a new Unity dedicated server
+app.post('/start-dedicated-server', (req, res) => {
+    const basePort = 7777;
+    const port = basePort + activeServers.length;
+
+    const serverPath = '/home/ubuntu/dedicated_servers/GameServer.x86_64';
+
+    const serverProcess = spawn(serverPath, [-port, port], {
+        cwd: '/home/ubuntu/dedicated_servers/',
+    });
+
+    serverProcess.stdout.on('data', (data) => {
+        console.log('Server stdout: ${ data }');
+    });
+
+    serverProcess.stderr.on('data', (data) => {
+        console.error('Server stderr: ${ data }');
+    });
+
+    const serverInfo = {
+        pid: serverProcess.pid,
+        ip: 'YOUR-EC2-PUBLIC-IP', // Change this to your EC2 public IP or domain
+        port: port
+    };
+
+    activeServers.push(serverInfo);
+    console.log('Started server at port ${ port }');
+
+    res.json(serverInfo);
+});
+
+// Manually register an existing server (e.g., PM2 started)
+app.post('/register-dedicated-server', (req, res) => {
+    const { ip, port } = req.body;
+    if (!ip || !port) return res.status(400).json({ error: 'IP and Port required' });
+
+    activeServers.push({ ip, port });
+    console.log('Manually registered server ${ ip }: ${ port }');
+    res.json({ message: 'Server registered.' });
+});
+
+// List available running servers
+app.get('/list-dedicated-servers', (req, res) => {
+    res.json(activeServers);
+});
+
+// Stop and unregister server
+app.post('/stop-dedicated-server', (req, res) => {
+    const { pid } = req.body;
+    const server = activeServers.find(s => s.pid === pid);
+
+    if (server) {
+        try {
+            process.kill(pid);
+            activeServers = activeServers.filter(s => s.pid !== pid);
+            console.log('Stopped server with PID ${ pid }');
+res.json({ message: 'Server stopped.' });
+        } catch (e) {
+    res.status(500).json({ error: 'Failed to stop server' });
+}
+    } else {
+    res.status(404).json({ error: 'Server not found' });
+}
+});
+
+// Unregister server without killing (optional if needed)
+app.post('/unregister-dedicated-server', (req, res) => {
+    const { ip, port } = req.body;
+    activeServers = activeServers.filter(s => !(s.ip === ip && s.port === port));
+    console.log('Unregistered server ${ ip }: ${ port }');
+    res.json({ message: 'Server unregistered.' });
 });
 
 // === START SECURE HTTPS SERVER === //
