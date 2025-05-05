@@ -137,35 +137,25 @@ app.get('/stats/:username', (req, res) => {
 let activeServers = [];
 
 // Start a new Unity dedicated server
+const { exec } = require('child_process');
+
 app.post('/start-dedicated-server', (req, res) => {
-    const basePort = 7777;
-    const port = basePort + activeServers.length;
+    const cmd = 'pm2 start /home/ubuntu/dedicated_servers/start_server_7777.sh --name unity-server-7777';
 
-    const serverPath = '/home/ubuntu/dedicated_servers/GameServer.x86_64';
+    exec(cmd, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error starting server: ${error.message}`);
+            return res.status(500).send('Failed to start server');
+        }
+        if (stderr) {
+            console.error(`stderr: ${stderr}`);
+        }
 
-    const serverProcess = spawn(serverPath, [-port, port], {
-        cwd: '/home/ubuntu/dedicated_servers/',
+        console.log(`stdout: ${stdout}`);
+        res.json({ ip: '13.51.167.138', port: 7777 }); // Adjust IP/port as needed
     });
-
-    serverProcess.stdout.on('data', (data) => {
-        console.log('Server stdout: ${ data }');
-    });
-
-    serverProcess.stderr.on('data', (data) => {
-        console.error('Server stderr: ${ data }');
-    });
-
-    const serverInfo = {
-        pid: serverProcess.pid,
-        ip: 'YOUR-EC2-PUBLIC-IP', // Change this to your EC2 public IP or domain
-        port: port
-    };
-
-    activeServers.push(serverInfo);
-    console.log('Started server at port ${ port }');
-
-    res.json(serverInfo);
 });
+
 
 // Manually register an existing server (e.g., PM2 started)
 app.post('/register-dedicated-server', (req, res) => {
@@ -173,7 +163,7 @@ app.post('/register-dedicated-server', (req, res) => {
     if (!ip || !port) return res.status(400).json({ error: 'IP and Port required' });
 
     activeServers.push({ ip, port });
-    console.log('Manually registered server ${ ip }: ${ port }');
+    console.log(`Manually registered server ${ip}: ${port}`);
     res.json({ message: 'Server registered.' });
 });
 
