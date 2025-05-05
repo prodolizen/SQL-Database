@@ -152,20 +152,31 @@ app.post('/start-dedicated-server', (req, res) => {
         }
 
         console.log(`stdout: ${stdout}`);
-        res.json({ ip: '13.51.167.138', port: 7777 }); // Adjust IP/port as needed
+        const ip = '13.51.167.138';
+        const port = 7777;
+        const name = 'unity-server-7777';
+
+        // Register in memory
+        activeServers.push({ ip, port, name });
+        console.log(`Auto-registered server ${name} at ${ip}:${port}`);
+
+        res.json({ ip, port, name });
+
     });
 });
 
 
-// Manually register an existing server (e.g., PM2 started)
 app.post('/register-dedicated-server', (req, res) => {
-    const { ip, port } = req.body;
-    if (!ip || !port) return res.status(400).json({ error: 'IP and Port required' });
+    const { ip, port, name } = req.body;
 
-    activeServers.push({ ip, port });
-    console.log(`Manually registered server ${ip}: ${port}`);
+    if (!ip || !port || !name)
+        return res.status(400).json({ error: 'IP, Port, and Name required' });
+
+    activeServers.push({ ip, port, name });
+    console.log(`Registered server ${name} at ${ip}:${port}`);
     res.json({ message: 'Server registered.' });
 });
+
 
 // List available running servers
 app.get('/list-dedicated-servers', (req, res) => {
@@ -174,21 +185,24 @@ app.get('/list-dedicated-servers', (req, res) => {
 
 // Stop and unregister server
 app.post('/stop-dedicated-server', (req, res) => {
-    const { pid } = req.body;
-    const server = activeServers.find(s => s.pid === pid);
+    const { name } = req.body;
 
-    if (server) {
-        try {
-            process.kill(pid);
-            activeServers = activeServers.filter(s => s.pid !== pid);
-            console.log('Stopped server with PID ${ pid }');
-res.json({ message: 'Server stopped.' });
-        } catch (e) {
-    res.status(500).json({ error: 'Failed to stop server' });
-}
-    } else {
-    res.status(404).json({ error: 'Server not found' });
-}
+    if (!name) return res.status(400).json({ error: 'Server name is required' });
+
+    // Remove from the activeServers list
+    activeServers = activeServers.filter(s => s.name !== name);
+    console.log(`Unregistered server: ${name}`);
+
+    // Stop the server with pm2
+    exec(`sudo pm2 delete ${name}`, (err, stdout, stderr) => {
+        if (err) {
+            console.error(`Failed to stop server ${name}: ${stderr}`);
+            return res.status(500).json({ error: 'Failed to stop server' });
+        }
+
+        console.log(`Stopped server ${name}`);
+        res.json({ message: `Server ${name} stopped.` });
+    });
 });
 
 // Unregister server without killing (optional if needed)
