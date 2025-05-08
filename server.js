@@ -1,4 +1,5 @@
-﻿const express = require('express');
+﻿//module import requirements
+const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const bcrypt = require('bcrypt');
@@ -7,17 +8,20 @@ const fs = require('fs');
 
 const app = express();
 const port = 3000; // 
-const SALT_ROUNDS = 10;
+const SALT_ROUNDS = 10; //number of rounds for password hashing
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json()); //parse json bodies
 
 // === DATABASE SETUP === //
+
+//create matchmaking database
 const roomsDB = new sqlite3.Database('./matchmaking.db', (err) => {
     if (err) console.error(err.message);
     else console.log('Connected to matchmaking DB');
 });
 
+//create accounts database
 const accountDB = new sqlite3.Database('./accounts.db', (err) => {
     if (err) console.error(err.message);
     else console.log('Connected to accounts DB');
@@ -43,6 +47,8 @@ accountDB.run(`
 `);
 
 // === ROOM ROUTES === //
+
+//create a room and fill correct rows in DB 
 app.post('/create-room', (req, res) => {
     const { roomCode, serverIp } = req.body;
     roomsDB.run(`INSERT INTO rooms (roomCode, serverIp) VALUES (?, ?)`, [roomCode, serverIp], function (err) {
@@ -51,6 +57,7 @@ app.post('/create-room', (req, res) => {
     });
 });
 
+//search for roomcode and retrieve linked serverip
 app.get('/get-ip/:roomCode', (req, res) => {
     const roomCode = req.params.roomCode;
     roomsDB.get(`SELECT serverIp FROM rooms WHERE roomCode = ?`, [roomCode], (err, row) => {
@@ -60,6 +67,7 @@ app.get('/get-ip/:roomCode', (req, res) => {
     });
 });
 
+//remove the row containing a specified roomccode from the database
 app.delete('/delete-room/:roomCode', (req, res) => {
     const roomCode = parseInt(req.params.roomCode);
     roomsDB.run(`DELETE FROM rooms WHERE roomCode = ?`, [roomCode], function (err) {
@@ -73,6 +81,7 @@ app.post('/register', (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
+    //hash pwd before saving to db 
     bcrypt.hash(password, SALT_ROUNDS, (err, hash) => {
         if (err) return res.status(500).json({ error: 'Error hashing password' });
 
@@ -95,6 +104,7 @@ app.post('/login', (req, res) => {
         if (err) return res.status(500).json({ error: 'Login error' });
         if (!row) return res.status(401).json({ error: 'Invalid username or password' });
 
+        //compare provided password with hashed password
         bcrypt.compare(password, row.password, (err, result) => {
             if (err || !result) return res.status(401).json({ error: 'Invalid username or password' });
             res.json({ message: 'Login successful' });
